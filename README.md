@@ -26,16 +26,41 @@
 ### 🔧 技术特性
 - 🔗 **API 兼容** - 兼容 OpenAI TTS API 格式
 - 🎵 **多音频格式** - 支持mp3、wav、m4a、flac、aac等9种音频格式
-- 🔐 **灵活配置** - 支持默认Token和自定义Token配置
+- 🔐 **访问保护** - TTS 接口支持访问密码，前端可保存到浏览器本地
 - 🎨 **现代化UI** - 优雅的卡片式设计，直观的模式切换
 
-## 🚀 一键部署
+## 🚀 部署
 
-### 点击按钮，一键部署到 CloudFlare Workers,
+### 一键部署到 Cloudflare Workers
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wangwangit/tts)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Loveyless/microsoft-tts)
 
+### Cloudflare Git 自动部署
 
+本仓库是单文件 Worker，入口由 `wrangler.toml` 的 `main = "index.js"` 指定，不需要额外构建步骤。
+
+在 Cloudflare Workers Builds 里建议使用以下配置：
+
+| 配置项 | 值 |
+| --- | --- |
+| Production branch | `main` |
+| Root directory | `/` |
+| Build command | 留空 |
+| Deploy command | `npx wrangler deploy` |
+
+如果 Cloudflare Builds 需要显式选择 `production` 环境，可将 Deploy command 改为：
+
+```bash
+npx wrangler deploy -e production
+```
+
+绑定 GitHub 仓库后，后续 push 到 `main` 会触发新的构建和部署；绑定之前已经存在的提交不一定会自动补跑。
+
+### 手动部署
+
+```bash
+npx wrangler deploy
+```
 
 ## 🎯 使用方法
 
@@ -251,16 +276,14 @@ curl -X POST "https://your-worker.workers.dev/v1/audio/transcriptions" \
 # 克隆项目
 git clone <your-repo>
 
-# 安装 Wrangler CLI
-npm install -g wrangler
-
 # 本地开发
-wrangler dev
+npx wrangler dev
 ```
 
 ### 项目结构
 
 ```
+├── .gitattributes    # 文本换行规则
 ├── index.js          # 主要代码文件
 ├── README.md         # 项目文档
 └── wrangler.toml     # Cloudflare Workers 配置
@@ -310,6 +333,5 @@ MIT License
 **🎙️ VoiceCraft - 让语音处理更智能，让创意更有声音！**
 
 *从文字到语音，从语音到文字，AI驱动的完整语音处理解决方案。*
-
 
 
