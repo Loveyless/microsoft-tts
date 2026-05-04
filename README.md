@@ -1,45 +1,256 @@
-# 🎙️ VoiceCraft - AI驱动的语音处理平台
+# Microsoft TTS Worker
 
-一个功能强大的AI语音处理平台，集成了文字转语音(TTS)和语音转文字(STT)双向功能。基于Microsoft Edge TTS和硅基流动API，支持20+种语音选项，为用户提供完整的语音处理解决方案。
->
-> 直接使用: https://tts.wangwangit.com
+这是一个部署在 Cloudflare Workers 上的语音处理 Worker。当前维护目标是提供稳定的 TTS API，并额外支持 TTS 合成时的句子级时间轴，方便播放器做文本高亮。词级时间轴仍然保留为可选能力，但默认和推荐用句子级。
 
-<img width="2512" height="1284" alt="image" src="https://github.com/user-attachments/assets/570961ef-b189-480f-833e-7877ce38f19d" />
+当前能力：
 
+- `POST /v1/audio/speech`: 文本转 MP3，返回 `audio/mpeg`。
+- `POST /v1/audio/speech/timeline`: 文本转 MP3，同时返回 timeline；默认句子级，用于播放时高亮文本。
+- `POST /v1/audio/transcriptions`: 音频转文字，转发到硅基流动 `FunAudioLLM/SenseVoiceSmall`。
+- `GET /`: 内置网页界面，适合手动生成、下载和转写。
 
-## ✨ 特性
+实现说明：
 
-### 🎯 核心功能
-- 🗣️ **文字转语音(TTS)** - 基于Microsoft Edge TTS，支持20+种中文语音
-- 🎧 **语音转文字(STT)** - 集成硅基流动API，高精度语音识别
-- 🔄 **双向处理** - 智能模式切换，语音与文字无缝转换
-- 🌍 **多语言支持** - 支持中文、英文、日文、韩文、西班牙文、法文、德文、俄文
+- TTS 普通接口使用 Microsoft Edge TTS HTTP synthesis endpoint。
+- TTS timeline 接口使用 Microsoft Edge TTS WebSocket metadata，不经过 STT 二次识别。
+- STT 不是微软服务，当前走硅基流动 API。
+- 项目是单文件 Worker，入口是 [index.js](./index.js)，部署配置在 [wrangler.toml](./wrangler.toml)。
 
-### 🎨 用户体验
-- ⚡ **秒速生成** - 快速生成高质量语音文件和转录文本
-- 🆓 **完全免费** - 无需注册，无使用限制
-- 📱 **响应式设计** - 完美适配桌面端和移动端
-- 🎛️ **丰富参数** - 支持语速、音调、语音风格等多种调节
-- 📥 **支持下载** - 生成的音频可直接下载为 MP3 格式
-- 📋 **便捷操作** - 转录结果可复制、编辑，支持转为语音功能
+## 接口鉴权
 
-### 🔧 技术特性
-- 🔗 **API 兼容** - 兼容 OpenAI TTS API 格式
-- 🎵 **多音频格式** - 支持mp3、wav、m4a、flac、aac等9种音频格式
-- 🔐 **访问保护** - TTS 接口支持访问密码，前端可保存到浏览器本地
-- 🎨 **现代化UI** - 优雅的卡片式设计，直观的模式切换
+TTS 相关接口需要在请求头传入 `x-api-key`。未配置 Worker 环境变量时默认 key 是 `less11111`。
 
-## 🚀 部署
+生产环境建议配置其中一个变量覆盖默认值：
 
-### 一键部署到 Cloudflare Workers
+- `LESS_TTS_API_KEY`
+- `API_KEY`
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Loveyless/microsoft-tts)
+示例：
 
-### Cloudflare Git 自动部署
+```bash
+curl -X POST "https://your-worker.workers.dev/v1/audio/speech" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: less11111" \
+  -d '{
+    "input": "你好，这是一个测试",
+    "voice": "zh-CN-XiaoxiaoNeural"
+  }' \
+  --output speech.mp3
+```
 
-本仓库是单文件 Worker，入口由 `wrangler.toml` 的 `main = "index.js"` 指定，不需要额外构建步骤。
+鉴权失败会返回 `401`，错误码为 `invalid_api_key`。
 
-在 Cloudflare Workers Builds 里建议使用以下配置：
+## TTS: 返回 MP3
+
+`POST /v1/audio/speech`
+
+请求 JSON：
+
+```json
+{
+  "input": "你好，这是一个测试",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "speed": 1.0,
+  "pitch": "0",
+  "volume": "0",
+  "style": "general"
+}
+```
+
+响应：
+
+- 成功：`Content-Type: audio/mpeg`
+- 失败：JSON error
+
+参数：
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `input` | string | 必填 | 要合成的文本 |
+| `voice` | string | `zh-CN-XiaoxiaoNeural` | 微软语音 short name |
+| `speed` | number/string | `1.0` | 语速，代码会转换成百分比 rate |
+| `pitch` | string/number | `"0"` | 音调，代码会转换成 Hz |
+| `volume` | string/number | `"0"` | 音量，代码会转换成百分比 |
+| `style` | string | `general` | 普通 TTS 接口支持的语音风格 |
+
+## TTS: 返回 MP3 + 时间轴
+
+`POST /v1/audio/speech/timeline`
+
+这个接口用于播放时高亮文本。它直接读取 TTS 合成过程里的 `audio.metadata`，不是先生成音频再做 STT，所以文本不会被二次识别改写。
+
+默认和推荐的粒度是 `sentence`。这不是段落级，也不是词级；它适合“当前播放到哪一句，就高亮哪一句”的场景。`word` 和 `all` 仍然支持，但不是默认用法。
+
+请求 JSON：
+
+```json
+{
+  "input": "第一句话。第二句话。",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "speed": 1.0,
+  "pitch": "0",
+  "volume": "0",
+  "boundary": "sentence"
+}
+```
+
+`boundary` 默认值是 `sentence`，可选值：
+
+| 值 | 说明 |
+| --- | --- |
+| `sentence` | 默认值；返回句子级边界，适合整句高亮 |
+| `word` | 返回词级边界，适合逐词高亮，通常不需要 |
+| `all` | 同时请求句子和词边界，适合调试或特殊前端需求 |
+
+响应 JSON：
+
+```json
+{
+  "audio": "base64-encoded-mp3",
+  "mimeType": "audio/mpeg",
+  "format": "mp3",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "boundary": "sentence",
+  "durationMs": 2904,
+  "timeline": [
+    {
+      "type": "sentence",
+      "text": "第一句话。",
+      "startMs": 100,
+      "endMs": 1438,
+      "durationMs": 1338,
+      "offsetTicks": 1000000,
+      "durationTicks": 13380000,
+      "textStart": 0,
+      "textEnd": 5
+    }
+  ]
+}
+```
+
+前端播放时可以用 `audio.currentTime * 1000` 匹配 `timeline`：
+
+```javascript
+const active = result.timeline.find((item) => {
+  const currentMs = audio.currentTime * 1000;
+  return currentMs >= item.startMs && currentMs < item.endMs;
+});
+```
+
+限制：
+
+- timeline 接口当前不支持 `style`。实测在 Edge TTS metadata WebSocket 中加入 `mstts:express-as` 会导致连接在 `turn.end` 前关闭。
+- timeline 接口返回 JSON，所以音频以 Base64 放在 `audio` 字段里；普通下载场景继续用 `/v1/audio/speech` 更合适。
+- 长文本会分块合成，跨块时间偏移基于当前固定输出格式 `audio-24khz-48kbitrate-mono-mp3` 估算。
+
+更多实现记录见 [docs/tts-timeline-notes.md](./docs/tts-timeline-notes.md)。
+
+## STT: 音频转文字
+
+`POST /v1/audio/transcriptions`
+
+请求使用 `multipart/form-data`：
+
+```bash
+curl -X POST "https://your-worker.workers.dev/v1/audio/transcriptions" \
+  -F "file=@audio.mp3" \
+  -F "token=your-siliconflow-token"
+```
+
+参数：
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `file` | File | 音频文件，支持 mp3、wav、m4a、flac、aac、ogg、webm、amr、3gp |
+| `token` | string | 可选，硅基流动 API token |
+
+限制：
+
+- 文件大小最大 10MB。
+- 当前模型固定为 `FunAudioLLM/SenseVoiceSmall`。
+- 当前 UI 只使用返回值里的 `text` 字段。
+
+## 常用语音
+
+常用中文女声：
+
+- `zh-CN-XiaoxiaoNeural`
+- `zh-CN-XiaoyiNeural`
+- `zh-CN-XiaochenNeural`
+- `zh-CN-XiaohanNeural`
+- `zh-CN-XiaomoNeural`
+- `zh-CN-XiaoxuanNeural`
+- `zh-CN-XiaoyanNeural`
+
+常用中文男声：
+
+- `zh-CN-YunxiNeural`
+- `zh-CN-YunyangNeural`
+- `zh-CN-YunjianNeural`
+- `zh-CN-YunfengNeural`
+- `zh-CN-YunhaoNeural`
+- `zh-CN-YunzeNeural`
+
+英文示例：
+
+- `en-US-AriaNeural`
+- `en-US-GuyNeural`
+
+## 本地开发
+
+启动本地 Worker：
+
+```bash
+npx wrangler dev --local --port 8787
+```
+
+验证普通 TTS：
+
+```bash
+curl -X POST "http://127.0.0.1:8787/v1/audio/speech" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: less11111" \
+  -d '{
+    "input": "你好，这是旧接口测试。",
+    "voice": "zh-CN-XiaoxiaoNeural"
+  }' \
+  --output speech.mp3
+```
+
+验证 timeline：
+
+```bash
+curl -X POST "http://127.0.0.1:8787/v1/audio/speech/timeline" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: less11111" \
+  -d '{
+    "input": "第一句话。第二句话。",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "boundary": "sentence"
+  }'
+```
+
+语法检查：
+
+```bash
+Get-Content -Path index.js | node --input-type=module --check
+```
+
+部署 dry run：
+
+```bash
+npx wrangler deploy --dry-run
+```
+
+如果只部署生产环境：
+
+```bash
+npx wrangler deploy -e production
+```
+
+## Cloudflare Builds 配置
+
+本仓库不需要构建步骤。Cloudflare Workers Builds 可以按下面配置：
 
 | 配置项 | 值 |
 | --- | --- |
@@ -48,290 +259,24 @@
 | Build command | 留空 |
 | Deploy command | `npx wrangler deploy` |
 
-如果 Cloudflare Builds 需要显式选择 `production` 环境，可将 Deploy command 改为：
+如果 Cloudflare 要求明确环境，可以把 Deploy command 改成：
 
 ```bash
 npx wrangler deploy -e production
 ```
 
-绑定 GitHub 仓库后，后续 push 到 `main` 会触发新的构建和部署；绑定之前已经存在的提交不一定会自动补跑。
+## 项目结构
 
-### 手动部署
-
-```bash
-npx wrangler deploy
+```text
+.
+├── docs/
+│   └── tts-timeline-notes.md
+├── index.js
+├── LICENSE
+├── README.md
+└── wrangler.toml
 ```
 
-## 🎯 使用方法
-
-### 🌐 网页界面使用
-
-#### 文字转语音模式
-1. 访问部署后的 Worker 域名
-2. 确保当前为"文字转语音"模式（默认模式）
-3. 选择输入方式：手动输入或上传txt文件
-4. 输入访问密码；页面会保存在当前浏览器，下次自动填入
-5. 在文本框中输入要转换的文字，或上传txt文件
-6. 选择喜欢的语音、语速、音调、语音风格等参数
-7. 点击"开始生成语音"按钮
-8. 播放生成的音频或下载 MP3 文件
-
-#### 语音转文字模式
-1. 点击页面顶部的"语音转文字"按钮切换模式
-2. 上传音频文件（支持mp3、wav、m4a等9种格式，最大10MB）
-3. 选择Token配置：使用默认Token或输入自定义硅基流动Token
-4. 点击"开始语音转录"按钮
-5. 查看转录结果，支持复制、编辑或直接转为语音
-
-#### 🌍 多语言切换
-- 点击右上角的语言切换器
-- 支持中文、English、日本語、한국어、Español、Français、Deutsch、Русский
-- 自动记住用户的语言偏好
-
-### 🔌 API 调用
-
-#### 文字转语音 API
-
-文字转语音接口默认需要在请求头传入 `x-api-key`。未配置 Worker 环境变量时默认 key 为 `less11111`；生产部署可通过 `LESS_TTS_API_KEY` 或 `API_KEY` 覆盖。漏传或传错会返回 `401`，错误码为 `invalid_api_key`。
-
-```javascript
-// JavaScript 调用示例
-const response = await fetch('https://your-worker.workers.dev/v1/audio/speech', {
-    method: 'POST',
-    headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': 'less11111',
-    },
-    body: JSON.stringify({
-        input: "你好，这是一个测试",
-        voice: "zh-CN-XiaoxiaoNeural",
-        speed: 1.0,
-        pitch: "0",
-        style: "general"
-    })
-});
-
-const audioBlob = await response.blob();
-```
-
-```bash
-# cURL 调用示例
-curl -X POST "https://your-worker.workers.dev/v1/audio/speech" \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: less11111" \
-  -d '{
-    "input": "你好，这是一个测试",
-    "voice": "zh-CN-XiaoxiaoNeural",
-    "speed": 1.0,
-    "pitch": "0",
-    "style": "general"
-  }' \
-  --output speech.mp3
-```
-
-#### 语音转文字 API
-
-```javascript
-// JavaScript 调用示例
-const formData = new FormData();
-formData.append('file', audioFile); // 音频文件
-formData.append('token', 'your-siliconflow-token'); // 可选，不提供则使用默认token
-
-const response = await fetch('https://your-worker.workers.dev/v1/audio/transcriptions', {
-    method: 'POST',
-    body: formData
-});
-
-const result = await response.json();
-console.log(result.text); // 转录结果
-```
-
-```bash
-# cURL 调用示例
-curl -X POST "https://your-worker.workers.dev/v1/audio/transcriptions" \
-  -F "file=@audio.mp3" \
-  -F "token=your-siliconflow-token"
-```
-
-## 🎨 支持的语音
-
-### 女声
-- `zh-CN-XiaoxiaoNeural` - 晓晓 (温柔)
-- `zh-CN-XiaoyiNeural` - 晓伊 (甜美)
-- `zh-CN-XiaochenNeural` - 晓辰 (知性)
-- `zh-CN-XiaohanNeural` - 晓涵 (优雅)
-- `zh-CN-XiaomengNeural` - 晓梦 (梦幻)
-- `zh-CN-XiaomoNeural` - 晓墨 (文艺)
-- `zh-CN-XiaoqiuNeural` - 晓秋 (成熟)
-- `zh-CN-XiaoruiNeural` - 晓睿 (智慧)
-- `zh-CN-XiaoshuangNeural` - 晓双 (活泼)
-- `zh-CN-XiaoxuanNeural` - 晓萱 (清新)
-- `zh-CN-XiaoyanNeural` - 晓颜 (柔美)
-- `zh-CN-XiaoyouNeural` - 晓悠 (悠扬)
-- `zh-CN-XiaozhenNeural` - 晓甄 (端庄)
-
-### 男声
-- `zh-CN-YunxiNeural` - 云希 (清朗)
-- `zh-CN-YunyangNeural` - 云扬 (阳光)
-- `zh-CN-YunjianNeural` - 云健 (稳重)
-- `zh-CN-YunfengNeural` - 云枫 (磁性)
-- `zh-CN-YunhaoNeural` - 云皓 (豪迈)
-- `zh-CN-YunxiaNeural` - 云夏 (热情)
-- `zh-CN-YunyeNeural` - 云野 (野性)
-- `zh-CN-YunzeNeural` - 云泽 (深沉)
-
-## ⚙️ API 参数
-
-### 🗣️ 文字转语音 API 参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `input` | string | - | 要转换的文本内容（必填） |
-| `voice` | string | `zh-CN-XiaoxiaoNeural` | 语音选择 |
-| `speed` | number | `1.0` | 语速 (0.5-2.0) |
-| `pitch` | string | `"0"` | 音调 (-50 到 50) |
-| `style` | string | `"general"` | 语音风格 |
-| `volume` | string | `"0"` | 音量调节 |
-
-### 🎧 语音转文字 API 参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `file` | File | - | 音频文件（必填，支持多种格式） |
-| `token` | string | 默认内置 | 硅基流动API Token（可选） |
-
-#### 支持的音频格式
-- **文件格式**: mp3, wav, m4a, flac, aac, ogg, webm, amr, 3gp
-- **文件大小**: 最大 10MB
-- **模型**: FunAudioLLM/SenseVoiceSmall（自动使用）
-
-### 支持的语音风格
-
-- `general` - 通用风格
-- `assistant` - 智能助手
-- `chat` - 聊天对话
-- `customerservice` - 客服专业
-- `newscast` - 新闻播报
-- `affectionate` - 亲切温暖
-- `calm` - 平静舒缓
-- `cheerful` - 愉快欢乐
-- `gentle` - 温和柔美
-- `lyrical` - 抒情诗意
-- `serious` - 严肃正式
-
-## 🛠️ 技术架构
-
-### 🔧 核心技术
-- **前端**: 现代化 HTML5 + CSS3 + 原生JavaScript
-- **后端**: Cloudflare Workers（边缘计算）
-- **TTS引擎**: Microsoft Edge TTS（20+种中文语音）
-- **STT引擎**: 硅基流动 FunAudioLLM/SenseVoiceSmall
-- **国际化**: 内置8种语言支持，自动检测浏览器语言
-
-### 🎨 设计架构
-- **设计系统**: CSS变量 + 响应式布局
-- **UI框架**: 无依赖，纯原生实现
-- **交互设计**: 双向模式切换，直观的用户体验
-- **API设计**: RESTful API，兼容OpenAI格式
-
-### 🔒 安全与性能
-- **无服务器**: 基于Cloudflare Workers，全球边缘部署
-- **数据安全**: 所有处理在边缘完成，无数据存储
-- **高可用**: 全球CDN加速，99.9%可用性
-- **零配置**: 开箱即用，无需额外配置
-
-## 🎨 设计特色
-
-### 🎯 用户界面
-- **双模式设计**: 水平布局的模式切换器，消除界面空白
-- **现代化 UI**: 采用简洁的卡片式设计
-- **国际化界面**: 8种语言无缝切换，右上角语言选择器
-- **响应式布局**: 完美适配各种设备尺寸
-- **微交互**: 丰富的悬停效果和动画
-
-### 🎨 视觉体验
-- **统一风格**: 新旧功能视觉一致，无违和感
-- **智能切换**: 根据模式动态显示相关界面元素
-- **无渐变设计**: 使用纯色设计，更加专业
-- **可访问性**: 支持键盘导航和屏幕阅读器
-
-## 📱 移动端优化
-
-### 🔄 适配策略
-- **模式切换**: 移动端垂直布局，桌面端水平布局
-- **触摸友好**: 按钮尺寸针对移动端优化
-- **文件上传**: 支持拖拽和点击两种方式
-- **性能优化**: 针对移动设备的网络和性能优化
-
-### 📋 功能适配
-- **音频上传**: 移动端优化的文件选择界面
-- **结果展示**: 移动端友好的转录结果展示
-- **语言切换**: 移动端下拉菜单适配
-
-## 🔧 开发
-
-### 本地开发
-
-```bash
-# 克隆项目
-git clone <your-repo>
-
-# 本地开发
-npx wrangler dev
-```
-
-### 项目结构
-
-```
-├── .gitattributes    # 文本换行规则
-├── index.js          # 主要代码文件
-├── README.md         # 项目文档
-└── wrangler.toml     # Cloudflare Workers 配置
-```
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 📄 许可证
+## 许可证
 
 MIT License
-
-## 🌟 更新日志
-
-### v2.0.0 - 重大更新
-- 🎉 **新增语音转文字功能** - 集成硅基流动API，支持高精度语音识别
-- 🌍 **多语言国际化** - 支持8种语言，自动检测浏览器语言
-- 🎨 **品牌升级** - 更名为VoiceCraft，全新的AI语音处理平台
-- 🔄 **双向处理** - 智能模式切换，语音与文字无缝转换
-- 📱 **界面优化** - 水平布局的模式切换器，更好的空间利用
-- 🔧 **错误修复** - 修复文本包含特殊字符时的XML转义问题
-
-### v1.x.x - 历史版本
-- 基础的文字转语音功能
-- Microsoft Edge TTS集成
-- 响应式设计
-
-## 🙏 致谢
-
-- **Microsoft Edge TTS** - 提供高质量的语音合成服务
-- **硅基流动** - 提供先进的语音识别API
-- **Cloudflare Workers** - 提供无服务器计算平台
-- **开源社区** - 感谢所有贡献者和用户的支持
-
-## 📞 联系我们
-
-关注公众号「一只会飞的旺旺」获取更多 AI 工具和技术分享：
-
-- 🔥 最新 AI 工具推荐和使用教程
-- 🚀 前沿技术解析和实战案例
-- 💎 独家资源和工具源码分享
-- 💬 技术问题答疑和交流社群
-
----
-
-**🎙️ VoiceCraft - 让语音处理更智能，让创意更有声音！**
-
-*从文字到语音，从语音到文字，AI驱动的完整语音处理解决方案。*
-
-

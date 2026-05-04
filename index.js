@@ -1,4 +1,17 @@
 const TOKEN_REFRESH_BEFORE_EXPIRY = 3 * 60;
+const EDGE_TTS_TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+const EDGE_TTS_BASE_URL = "speech.platform.bing.com/consumer/speech/synthesize/readaloud";
+const EDGE_TTS_HTTPS_URL = `https://${EDGE_TTS_BASE_URL}/edge/v1?TrustedClientToken=${EDGE_TTS_TRUSTED_CLIENT_TOKEN}`;
+const EDGE_TTS_CHROMIUM_FULL_VERSION = "143.0.3650.75";
+const EDGE_TTS_CHROMIUM_MAJOR_VERSION = EDGE_TTS_CHROMIUM_FULL_VERSION.split(".")[0];
+const EDGE_TTS_SEC_MS_GEC_VERSION = `1-${EDGE_TTS_CHROMIUM_FULL_VERSION}`;
+const EDGE_TTS_OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3";
+const EDGE_TTS_MAX_ESCAPED_TEXT_BYTES = 3800;
+const EDGE_TTS_MAX_CHUNKS = 40;
+const EDGE_TTS_TIMEOUT_MS = 45000;
+const EDGE_TTS_TICKS_PER_SECOND = 10000000;
+const EDGE_TTS_MP3_BITRATE_BPS = 48000;
+const WINDOWS_EPOCH_SECONDS = 11644473600;
 let tokenInfo = {
     endpoint: null,
     token: null,
@@ -2245,6 +2258,33 @@ async function handleRequest(request, env = {}) {
         }
     }
 
+    if (path === "/v1/audio/speech/timeline") {
+        const authResponse = authenticateSpeechRequest(request, env);
+        if (authResponse) {
+            return authResponse;
+        }
+
+        try {
+            return await handleSpeechTimeline(request);
+        } catch (error) {
+            console.error("Speech timeline error:", error);
+            return new Response(JSON.stringify({
+                error: {
+                    message: error.message,
+                    type: "api_error",
+                    param: null,
+                    code: "speech_timeline_error"
+                }
+            }), {
+                status: 500,
+                headers: {
+                    "Content-Type": "application/json",
+                    ...makeCORSHeaders()
+                }
+            });
+        }
+    }
+
     if (path === "/v1/audio/speech") {
         const authResponse = authenticateSpeechRequest(request, env);
         if (authResponse) {
@@ -2368,6 +2408,539 @@ async function handleOptions(request) {
 // 添加延迟函数
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function handleSpeechTimeline(request) {
+    const contentType = request.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+        return new Response(JSON.stringify({
+            error: {
+                message: "speech timeline only supports JSON requests",
+                type: "invalid_request_error",
+                param: "content-type",
+                code: "invalid_content_type"
+            }
+        }), {
+            status: 400,
+            headers: {
+                "Content-Type": "application/json",
+                ...makeCORSHeaders()
+            }
+        });
+    }
+
+    const requestBody = await request.json();
+    const {
+        input,
+        voice = "zh-CN-XiaoxiaoNeural",
+        speed = "1.0",
+        volume = "0",
+        pitch = "0",
+        boundary = "sentence"
+    } = requestBody;
+
+    let rate = parseInt(String((parseFloat(speed) - 1.0) * 100));
+    let numVolume = parseInt(String(parseFloat(volume) * 100));
+    let numPitch = parseInt(pitch);
+    const normalizedBoundary = normalizeTimelineBoundary(boundary);
+
+    const result = await getVoiceWithTimeline(
+        input,
+        voice,
+        rate >= 0 ? `+${rate}%` : `${rate}%`,
+        numPitch >= 0 ? `+${numPitch}Hz` : `${numPitch}Hz`,
+        numVolume >= 0 ? `+${numVolume}%` : `${numVolume}%`,
+        EDGE_TTS_OUTPUT_FORMAT,
+        normalizedBoundary
+    );
+
+    return new Response(JSON.stringify(result), {
+        headers: {
+            "Content-Type": "application/json",
+            ...makeCORSHeaders()
+        }
+    });
+}
+
+function normalizeTimelineBoundary(boundary) {
+    const value = String(boundary || "sentence").toLowerCase();
+    if (value === "sentence" || value === "word" || value === "all") {
+        return value;
+    }
+    throw new Error("boundary must be sentence, word, or all");
+}
+
+async function getVoiceWithTimeline(text, voiceName, rate, pitch, volume, outputFormat, boundary) {
+    const cleanText = removeIncompatibleCharacters(String(text || "").trim());
+    if (!cleanText) {
+        throw new Error("文本内容为空");
+    }
+
+    const escapedText = escapeXmlText(cleanText);
+    const chunks = splitEscapedTextByByteLength(escapedText, EDGE_TTS_MAX_ESCAPED_TEXT_BYTES);
+    if (chunks.length > EDGE_TTS_MAX_CHUNKS) {
+        throw new Error(`文本过长，分块数量(${chunks.length})超过限制。请缩短文本或分批处理。`);
+    }
+
+    const audioChunks = [];
+    const timeline = [];
+    let offsetTicks = 0;
+
+    for (const chunk of chunks) {
+        const result = await getEdgeAudioChunkWithTimeline(
+            chunk,
+            voiceName,
+            rate,
+            pitch,
+            volume,
+            outputFormat,
+            boundary
+        );
+
+        audioChunks.push(result.audio);
+        for (const item of result.timeline) {
+            const startTicks = offsetTicks + item.rawOffsetTicks;
+            const durationTicks = item.rawDurationTicks;
+            timeline.push({
+                type: item.type,
+                text: item.text,
+                startMs: ticksToMs(startTicks),
+                endMs: ticksToMs(startTicks + durationTicks),
+                durationMs: ticksToMs(durationTicks),
+                offsetTicks: startTicks,
+                durationTicks
+            });
+        }
+
+        offsetTicks += estimateCbrMp3DurationTicks(result.audio.byteLength);
+    }
+
+    const audioBytes = concatUint8Arrays(audioChunks);
+    const rangedTimeline = normalizeTimelineForPlayback(attachTextRanges(timeline, cleanText));
+
+    return {
+        audio: await bytesToBase64(audioBytes),
+        mimeType: "audio/mpeg",
+        format: "mp3",
+        voice: voiceName,
+        boundary,
+        durationMs: ticksToMs(offsetTicks),
+        timeline: rangedTimeline
+    };
+}
+
+async function getEdgeAudioChunkWithTimeline(escapedText, voiceName, rate, pitch, volume, outputFormat, boundary) {
+    return new Promise(async (resolve, reject) => {
+        let websocket;
+        let settled = false;
+        const audioChunks = [];
+        const timeline = [];
+
+        const timeout = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                try {
+                    websocket && websocket.close();
+                } catch (_) {}
+                reject(new Error("Edge TTS WebSocket request timed out"));
+            }
+        }, EDGE_TTS_TIMEOUT_MS);
+
+        const finish = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(timeout);
+            try {
+                websocket && websocket.close();
+            } catch (_) {}
+            resolve({
+                audio: concatUint8Arrays(audioChunks),
+                timeline
+            });
+        };
+
+        const fail = (error) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(timeout);
+            try {
+                websocket && websocket.close();
+            } catch (_) {}
+            reject(error);
+        };
+
+        try {
+            const connectionId = uuid();
+            websocket = await openEdgeTtsWebSocket(connectionId);
+
+            websocket.addEventListener("message", (event) => {
+                handleEdgeTtsMessage(event.data, audioChunks, timeline)
+                    .then((path) => {
+                        if (path === "turn.end") {
+                            finish();
+                        }
+                    })
+                    .catch(fail);
+            });
+
+            websocket.addEventListener("error", () => {
+                fail(new Error("Edge TTS WebSocket error"));
+            });
+
+            websocket.addEventListener("close", () => {
+                if (!settled) {
+                    fail(new Error("Edge TTS WebSocket closed before turn.end"));
+                }
+            });
+
+            const requestId = uuid();
+            websocket.send(getSpeechConfigMessage(outputFormat, boundary));
+            websocket.send(getEdgeSsmlMessage(requestId, escapedText, voiceName, rate, pitch, volume));
+        } catch (error) {
+            fail(error);
+        }
+    });
+}
+
+async function openEdgeTtsWebSocket(connectionId) {
+    const secMsGec = await generateSecMsGec();
+    const url = `${EDGE_TTS_HTTPS_URL}&ConnectionId=${connectionId}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=${EDGE_TTS_SEC_MS_GEC_VERSION}`;
+    const response = await fetch(url, {
+        headers: {
+            "Upgrade": "websocket",
+            "Pragma": "no-cache",
+            "Cache-Control": "no-cache",
+            "User-Agent": getEdgeUserAgent(),
+            "Origin": "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
+            "Cookie": `muid=${randomHex(16)};`
+        }
+    });
+
+    if (response.status !== 101 || !response.webSocket) {
+        throw new Error(`Edge TTS WebSocket connection failed: ${response.status}`);
+    }
+
+    const websocket = response.webSocket;
+    websocket.accept();
+    return websocket;
+}
+
+function getSpeechConfigMessage(outputFormat, boundary) {
+    const sentenceBoundaryEnabled = boundary === "sentence" || boundary === "all";
+    const wordBoundaryEnabled = boundary === "word" || boundary === "all";
+    return [
+        `X-Timestamp:${edgeDateString()}`,
+        "Content-Type:application/json; charset=utf-8",
+        "Path:speech.config",
+        "",
+        JSON.stringify({
+            context: {
+                synthesis: {
+                    audio: {
+                        metadataoptions: {
+                            sentenceBoundaryEnabled: String(sentenceBoundaryEnabled),
+                            wordBoundaryEnabled: String(wordBoundaryEnabled)
+                        },
+                        outputFormat
+                    }
+                }
+            }
+        })
+    ].join("\r\n");
+}
+
+function getEdgeSsmlMessage(requestId, escapedText, voiceName, rate, pitch, volume) {
+    return [
+        `X-RequestId:${requestId}`,
+        "Content-Type:application/ssml+xml",
+        `X-Timestamp:${edgeDateString()}Z`,
+        "Path:ssml",
+        "",
+        getEdgeSsmlFromEscapedText(escapedText, voiceName, rate, pitch, volume)
+    ].join("\r\n");
+}
+
+function getEdgeSsmlFromEscapedText(escapedText, voiceName, rate, pitch, volume) {
+    return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">` +
+        `<voice name="${voiceName}">` +
+        `<prosody rate="${rate}" pitch="${pitch}" volume="${volume}">${escapedText}</prosody>` +
+        `</voice>` +
+        `</speak>`;
+}
+
+async function handleEdgeTtsMessage(data, audioChunks, timeline) {
+    if (typeof data === "string") {
+        const { headers, body } = parseEdgeTextFrame(data);
+        const path = headers.Path || "";
+        if (path === "audio.metadata") {
+            timeline.push(...parseEdgeMetadata(body));
+        }
+        return path;
+    }
+
+    const bytes = await toUint8Array(data);
+    const { headers, body } = parseEdgeBinaryFrame(bytes);
+    const path = headers.Path || "";
+    if (path === "audio" && body.byteLength > 0) {
+        audioChunks.push(body);
+    }
+    return path;
+}
+
+function parseEdgeTextFrame(text) {
+    const separatorIndex = text.indexOf("\r\n\r\n");
+    if (separatorIndex === -1) {
+        return { headers: {}, body: "" };
+    }
+
+    return {
+        headers: parseEdgeHeaders(text.slice(0, separatorIndex)),
+        body: text.slice(separatorIndex + 4)
+    };
+}
+
+function parseEdgeBinaryFrame(bytes) {
+    if (bytes.byteLength < 2) {
+        return { headers: {}, body: bytes };
+    }
+
+    const headerLength = (bytes[0] << 8) + bytes[1];
+    const preferredHeaderStart = 2;
+    const preferredHeaderEnd = preferredHeaderStart + headerLength;
+
+    if (preferredHeaderEnd <= bytes.byteLength) {
+        const headers = parseEdgeHeaders(new TextDecoder().decode(bytes.slice(preferredHeaderStart, preferredHeaderEnd)));
+        if (headers.Path) {
+            return {
+                headers,
+                body: bytes.slice(preferredHeaderEnd)
+            };
+        }
+    }
+
+    const fallbackHeaderEnd = Math.min(headerLength, bytes.byteLength);
+    return {
+        headers: parseEdgeHeaders(new TextDecoder().decode(bytes.slice(0, fallbackHeaderEnd))),
+        body: bytes.slice(Math.min(fallbackHeaderEnd + 2, bytes.byteLength))
+    };
+}
+
+function parseEdgeHeaders(headerText) {
+    const headers = {};
+    for (const line of headerText.split("\r\n")) {
+        const index = line.indexOf(":");
+        if (index > 0) {
+            headers[line.slice(0, index)] = line.slice(index + 1);
+        }
+    }
+    return headers;
+}
+
+function parseEdgeMetadata(body) {
+    if (!body) {
+        return [];
+    }
+
+    const parsed = JSON.parse(body);
+    const items = Array.isArray(parsed.Metadata) ? parsed.Metadata : [];
+    return items.map((item) => {
+        const data = item.Data || {};
+        const textInfo = data.text || data.Text || {};
+        const rawType = String(item.Type || "").replace(/Boundary$/i, "").toLowerCase();
+        return {
+            type: rawType || "boundary",
+            text: unescapeXmlText(String(textInfo.Text || textInfo.text || data.Text || "")),
+            rawOffsetTicks: Number(data.Offset || 0),
+            rawDurationTicks: Number(data.Duration || 0)
+        };
+    }).filter((item) => item.text || item.type === "punctuation");
+}
+
+function unescapeXmlText(text) {
+    return text
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&');
+}
+
+function attachTextRanges(timeline, text) {
+    let cursor = 0;
+    return timeline.map((item) => {
+        const value = item.text || "";
+        let textStart = -1;
+        let textEnd = -1;
+
+        if (value) {
+            textStart = text.indexOf(value, cursor);
+            if (textStart === -1) {
+                textStart = text.indexOf(value.trim(), cursor);
+            }
+
+            if (textStart !== -1) {
+                textEnd = textStart + value.length;
+                cursor = textEnd;
+            }
+        }
+
+        return {
+            ...item,
+            textStart,
+            textEnd
+        };
+    });
+}
+
+function normalizeTimelineForPlayback(timeline) {
+    const result = timeline.map((item) => ({ ...item }));
+    const lastIndexByType = {};
+
+    for (let i = 0; i < result.length; i++) {
+        const item = result[i];
+        const previousIndex = lastIndexByType[item.type];
+        if (previousIndex !== undefined) {
+            const previous = result[previousIndex];
+            if (previous.endMs > item.startMs) {
+                previous.endMs = item.startMs;
+                previous.durationMs = Math.max(0, previous.endMs - previous.startMs);
+                previous.durationTicks = Math.round((previous.durationMs / 1000) * EDGE_TTS_TICKS_PER_SECOND);
+            }
+        }
+        lastIndexByType[item.type] = i;
+    }
+
+    return result;
+}
+
+function splitEscapedTextByByteLength(text, maxBytes) {
+    const chunks = [];
+    let current = "";
+    let currentBytes = 0;
+
+    for (const token of xmlSafeTokens(text)) {
+        const tokenBytes = utf8ByteLength(token);
+        if (current && currentBytes + tokenBytes > maxBytes) {
+            chunks.push(current);
+            current = "";
+            currentBytes = 0;
+        }
+        current += token;
+        currentBytes += tokenBytes;
+    }
+
+    if (current) {
+        chunks.push(current);
+    }
+
+    return chunks;
+}
+
+function xmlSafeTokens(text) {
+    const tokens = [];
+    for (let i = 0; i < text.length;) {
+        if (text[i] === "&") {
+            const entityEnd = text.indexOf(";", i + 1);
+            if (entityEnd !== -1 && entityEnd - i <= 10) {
+                tokens.push(text.slice(i, entityEnd + 1));
+                i = entityEnd + 1;
+                continue;
+            }
+        }
+
+        const codePoint = text.codePointAt(i);
+        const token = String.fromCodePoint(codePoint);
+        tokens.push(token);
+        i += token.length;
+    }
+    return tokens;
+}
+
+function utf8ByteLength(text) {
+    return new TextEncoder().encode(text).byteLength;
+}
+
+function removeIncompatibleCharacters(text) {
+    let result = "";
+    for (const char of text) {
+        const codePoint = char.codePointAt(0);
+        if (
+            codePoint === 0x09 ||
+            codePoint === 0x0A ||
+            codePoint === 0x0D ||
+            (codePoint >= 0x20 && codePoint <= 0xD7FF) ||
+            (codePoint >= 0xE000 && codePoint <= 0xFFFD) ||
+            (codePoint >= 0x10000 && codePoint <= 0x10FFFF)
+        ) {
+            result += char;
+        }
+    }
+    return result;
+}
+
+async function generateSecMsGec() {
+    let ticks = Math.floor(Date.now() / 1000) + WINDOWS_EPOCH_SECONDS;
+    ticks -= ticks % 300;
+    const windowsTicks = Math.floor(ticks * EDGE_TTS_TICKS_PER_SECOND);
+    const digest = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(`${windowsTicks}${EDGE_TTS_TRUSTED_CLIENT_TOKEN}`)
+    );
+    return bytesToHex(new Uint8Array(digest)).toUpperCase();
+}
+
+function randomHex(byteLength) {
+    const bytes = new Uint8Array(byteLength);
+    crypto.getRandomValues(bytes);
+    return bytesToHex(bytes).toUpperCase();
+}
+
+function bytesToHex(bytes) {
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function edgeDateString() {
+    return new Date().toString();
+}
+
+function getEdgeUserAgent() {
+    return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${EDGE_TTS_CHROMIUM_FULL_VERSION} Safari/537.36 Edg/${EDGE_TTS_CHROMIUM_MAJOR_VERSION}.0.0.0`;
+}
+
+function ticksToMs(ticks) {
+    return Math.round((ticks / EDGE_TTS_TICKS_PER_SECOND) * 1000);
+}
+
+function estimateCbrMp3DurationTicks(byteLength) {
+    return Math.round((byteLength * 8 * EDGE_TTS_TICKS_PER_SECOND) / EDGE_TTS_MP3_BITRATE_BPS);
+}
+
+function concatUint8Arrays(chunks) {
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+        result.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return result;
+}
+
+async function toUint8Array(data) {
+    if (data instanceof Uint8Array) {
+        return data;
+    }
+    if (data instanceof ArrayBuffer) {
+        return new Uint8Array(data);
+    }
+    if (data instanceof Blob) {
+        return new Uint8Array(await data.arrayBuffer());
+    }
+    return new Uint8Array(data);
 }
 
 // 优化文本分块函数
@@ -2720,7 +3293,12 @@ async function base64ToBytes(base64) {
 }
 
 async function bytesToBase64(bytes) {
-    return btoa(String.fromCharCode.apply(null, bytes));
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
 }
 
 function uuid() {
