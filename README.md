@@ -45,10 +45,11 @@
 1. 访问部署后的 Worker 域名
 2. 确保当前为"文字转语音"模式（默认模式）
 3. 选择输入方式：手动输入或上传txt文件
-4. 在文本框中输入要转换的文字，或上传txt文件
-5. 选择喜欢的语音、语速、音调、语音风格等参数
-6. 点击"开始生成语音"按钮
-7. 播放生成的音频或下载 MP3 文件
+4. 输入访问密码；页面会保存在当前浏览器，下次自动填入
+5. 在文本框中输入要转换的文字，或上传txt文件
+6. 选择喜欢的语音、语速、音调、语音风格等参数
+7. 点击"开始生成语音"按钮
+8. 播放生成的音频或下载 MP3 文件
 
 #### 语音转文字模式
 1. 点击页面顶部的"语音转文字"按钮切换模式
@@ -66,12 +67,15 @@
 
 #### 文字转语音 API
 
+文字转语音接口默认需要在请求头传入 `x-api-key`。未配置 Worker 环境变量时默认 key 为 `less11111`；生产部署可通过 `LESS_TTS_API_KEY` 或 `API_KEY` 覆盖。漏传或传错会返回 `401`，错误码为 `invalid_api_key`。
+
 ```javascript
 // JavaScript 调用示例
 const response = await fetch('https://your-worker.workers.dev/v1/audio/speech', {
     method: 'POST',
     headers: {
         'Content-Type': 'application/json',
+        'x-api-key': 'less11111',
     },
     body: JSON.stringify({
         input: "你好，这是一个测试",
@@ -89,6 +93,7 @@ const audioBlob = await response.blob();
 # cURL 调用示例
 curl -X POST "https://your-worker.workers.dev/v1/audio/speech" \
   -H "Content-Type: application/json" \
+  -H "x-api-key: less11111" \
   -d '{
     "input": "你好，这是一个测试",
     "voice": "zh-CN-XiaoxiaoNeural",
@@ -296,13 +301,13 @@ MIT License
 关注公众号「一只会飞的旺旺」获取更多 AI 工具和技术分享：
 
 - 🔥 最新 AI 工具推荐和使用教程
-- 🚀 前沿技术解析和实战案例  
+- 🚀 前沿技术解析和实战案例
 - 💎 独家资源和工具源码分享
 - 💬 技术问题答疑和交流社群
 
 ---
 
-**🎙️ VoiceCraft - 让语音处理更智能，让创意更有声音！** 
+**🎙️ VoiceCraft - 让语音处理更智能，让创意更有声音！**
 
 *从文字到语音，从语音到文字，AI驱动的完整语音处理解决方案。*
 

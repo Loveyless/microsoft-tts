@@ -146,6 +146,13 @@ const HTML_PAGE = `
             border-color: var(--border-focus);
             box-shadow: 0 0 0 3px rgb(59 130 246 / 0.1);
         }
+
+        .form-hint {
+            margin-top: 8px;
+            color: var(--text-secondary);
+            font-size: 0.8125rem;
+            line-height: 1.5;
+        }
         
         .form-textarea {
             min-height: 120px;
@@ -1047,7 +1054,15 @@ const HTML_PAGE = `
                             </div>
                         </div>
                     </div>
-                
+
+                    <div class="form-group">
+                        <label class="form-label" for="ttsApiKeyInput" data-i18n="tts.apiKey.label">访问密码</label>
+                        <input type="password" class="form-input" id="ttsApiKeyInput"
+                               placeholder="输入 less-tts 密码" data-i18n-placeholder="tts.apiKey.placeholder"
+                               autocomplete="current-password" spellcheck="false">
+                        <p class="form-hint" data-i18n="tts.apiKey.hint">保存在当前浏览器，下次自动填入。</p>
+                    </div>
+
                     <div class="controls-grid">
                         <div class="form-group">
                             <label class="form-label" for="voice">语音选择</label>
@@ -1287,7 +1302,11 @@ const HTML_PAGE = `
                 'header.feature3': 'Completely Free',
                 'header.feature4': 'Download Support',
                 'mode.tts': 'Text to Speech',
-                'mode.transcription': 'Speech to Text'
+                'mode.transcription': 'Speech to Text',
+                'tts.apiKey.label': 'Access password',
+                'tts.apiKey.placeholder': 'Enter less-tts password',
+                'tts.apiKey.hint': 'Saved in this browser and filled automatically next time.',
+                'tts.apiKey.required': 'Please enter the access password'
             },
             zh: {
                 'page.title': 'VoiceCraft - AI驱动的语音处理平台',
@@ -1309,7 +1328,11 @@ const HTML_PAGE = `
                 'header.feature3': '完全免费',
                 'header.feature4': '支持下载',
                 'mode.tts': '文字转语音',
-                'mode.transcription': '语音转文字'
+                'mode.transcription': '语音转文字',
+                'tts.apiKey.label': '访问密码',
+                'tts.apiKey.placeholder': '输入 less-tts 密码',
+                'tts.apiKey.hint': '保存在当前浏览器，下次自动填入。',
+                'tts.apiKey.required': '请输入访问密码'
             },
             ja: {
                 'page.title': 'VoiceCraft - AI音声処理プラットフォーム',
@@ -1331,7 +1354,11 @@ const HTML_PAGE = `
                 'header.feature3': '完全無料',
                 'header.feature4': 'ダウンロード対応',
                 'mode.tts': 'テキスト読み上げ',
-                'mode.transcription': '音声テキスト変換'
+                'mode.transcription': '音声テキスト変換',
+                'tts.apiKey.label': 'アクセスパスワード',
+                'tts.apiKey.placeholder': 'less-tts パスワードを入力',
+                'tts.apiKey.hint': 'このブラウザに保存され、次回は自動入力されます。',
+                'tts.apiKey.required': 'アクセスパスワードを入力してください'
             },
             ko: {
                 'page.title': 'VoiceCraft - AI 음성 처리 플랫폼',
@@ -1353,7 +1380,11 @@ const HTML_PAGE = `
                 'header.feature3': '완전 무료',
                 'header.feature4': '다운로드 지원',
                 'mode.tts': '텍스트 음성 변환',
-                'mode.transcription': '음성 텍스트 변환'
+                'mode.transcription': '음성 텍스트 변환',
+                'tts.apiKey.label': '접근 비밀번호',
+                'tts.apiKey.placeholder': 'less-tts 비밀번호 입력',
+                'tts.apiKey.hint': '이 브라우저에 저장되고 다음에 자동으로 입력됩니다.',
+                'tts.apiKey.required': '접근 비밀번호를 입력하세요'
             },
             es: {
                 'page.title': 'VoiceCraft - Plataforma de Procesamiento de Voz con IA',
@@ -1375,7 +1406,11 @@ const HTML_PAGE = `
                 'header.feature3': 'Completamente Gratis',
                 'header.feature4': 'Soporte de Descarga',
                 'mode.tts': 'Texto a Voz',
-                'mode.transcription': 'Voz a Texto'
+                'mode.transcription': 'Voz a Texto',
+                'tts.apiKey.label': 'Contraseña de acceso',
+                'tts.apiKey.placeholder': 'Introduce la contraseña de less-tts',
+                'tts.apiKey.hint': 'Se guarda en este navegador y se completa automáticamente la próxima vez.',
+                'tts.apiKey.required': 'Introduce la contraseña de acceso'
             },
             fr: {
                 'page.title': 'VoiceCraft - Plateforme de Traitement Vocal IA',
@@ -1397,7 +1432,11 @@ const HTML_PAGE = `
                 'header.feature3': 'Entièrement Gratuit',
                 'header.feature4': 'Support de Téléchargement',
                 'mode.tts': 'Texte vers Parole',
-                'mode.transcription': 'Parole vers Texte'
+                'mode.transcription': 'Parole vers Texte',
+                'tts.apiKey.label': 'Mot de passe',
+                'tts.apiKey.placeholder': 'Saisissez le mot de passe less-tts',
+                'tts.apiKey.hint': 'Enregistré dans ce navigateur et rempli automatiquement la prochaine fois.',
+                'tts.apiKey.required': 'Saisissez le mot de passe'
             },
             de: {
                 'page.title': 'VoiceCraft - KI-gestützte Sprachverarbeitungsplattform',
@@ -1419,7 +1458,11 @@ const HTML_PAGE = `
                 'header.feature3': 'Völlig Kostenlos',
                 'header.feature4': 'Download-Unterstützung',
                 'mode.tts': 'Text zu Sprache',
-                'mode.transcription': 'Sprache zu Text'
+                'mode.transcription': 'Sprache zu Text',
+                'tts.apiKey.label': 'Zugangspasswort',
+                'tts.apiKey.placeholder': 'less-tts Passwort eingeben',
+                'tts.apiKey.hint': 'Wird in diesem Browser gespeichert und beim nächsten Mal automatisch ausgefüllt.',
+                'tts.apiKey.required': 'Bitte Zugangspasswort eingeben'
             },
             ru: {
                 'page.title': 'VoiceCraft - ИИ-платформа обработки голоса',
@@ -1441,7 +1484,11 @@ const HTML_PAGE = `
                 'header.feature3': 'Совершенно Бесплатно',
                 'header.feature4': 'Поддержка Загрузки',
                 'mode.tts': 'Текст в Речь',
-                'mode.transcription': 'Речь в Текст'
+                'mode.transcription': 'Речь в Текст',
+                'tts.apiKey.label': 'Пароль доступа',
+                'tts.apiKey.placeholder': 'Введите пароль less-tts',
+                'tts.apiKey.hint': 'Сохраняется в этом браузере и подставляется автоматически в следующий раз.',
+                'tts.apiKey.required': 'Введите пароль доступа'
             }
         };
 
@@ -1492,6 +1539,13 @@ const HTML_PAGE = `
                     element.setAttribute('content', langData[key]);
                 }
             });
+
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(element => {
+                const key = element.getAttribute('data-i18n-placeholder');
+                if (langData[key]) {
+                    element.setAttribute('placeholder', langData[key]);
+                }
+            });
             
             // 更新页面标题
             if (langData['page.title']) {
@@ -1532,6 +1586,7 @@ const HTML_PAGE = `
             // 初始化其他功能
             initializeInputMethodTabs();
             initializeFileUpload();
+            initializeTtsApiKey();
             initializeModeSwitcher();
             initializeAudioUpload();
             initializeTokenConfig();
@@ -1645,6 +1700,32 @@ const HTML_PAGE = `
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
+        function initializeTtsApiKey() {
+            const apiKeyInput = document.getElementById('ttsApiKeyInput');
+            const savedApiKey = localStorage.getItem('voicecraft-tts-api-key');
+
+            if (savedApiKey) {
+                apiKeyInput.value = savedApiKey;
+            }
+
+            apiKeyInput.addEventListener('input', function() {
+                const apiKey = apiKeyInput.value.trim();
+                if (apiKey) {
+                    localStorage.setItem('voicecraft-tts-api-key', apiKey);
+                } else {
+                    localStorage.removeItem('voicecraft-tts-api-key');
+                }
+            });
+        }
+
+        function getTtsApiKey() {
+            const apiKey = document.getElementById('ttsApiKeyInput').value.trim();
+            if (apiKey) {
+                localStorage.setItem('voicecraft-tts-api-key', apiKey);
+            }
+            return apiKey;
+        }
+
         // 表单提交处理
         document.getElementById('ttsForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -1659,6 +1740,13 @@ const HTML_PAGE = `
             const loading = document.getElementById('loading');
             const success = document.getElementById('success');
             const error = document.getElementById('error');
+            const apiKey = getTtsApiKey();
+
+            if (!apiKey) {
+                alert(translations[currentLanguage]['tts.apiKey.required'] || translations.en['tts.apiKey.required']);
+                document.getElementById('ttsApiKeyInput').focus();
+                return;
+            }
             
             // 验证输入
             if (currentInputMethod === 'text') {
@@ -1708,6 +1796,7 @@ const HTML_PAGE = `
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
+                            'x-api-key': apiKey,
                         },
                         body: JSON.stringify({
                             input: text,
@@ -1731,6 +1820,9 @@ const HTML_PAGE = `
                     
                     response = await fetch('/v1/audio/speech', {
                         method: 'POST',
+                        headers: {
+                            'x-api-key': apiKey,
+                        },
                         body: formData
                     });
                 }
@@ -2103,11 +2195,14 @@ const HTML_PAGE = `
 
 export default {
     async fetch(request, env, ctx) {
-        return handleRequest(request);
+        return handleRequest(request, env);
     }
 };
 
-async function handleRequest(request) {
+const DEFAULT_API_KEY = "less11111";
+const API_KEY_ENV_KEYS = ["LESS_TTS_API_KEY", "API_KEY"];
+
+async function handleRequest(request, env = {}) {
     if (request.method === "OPTIONS") {
         return handleOptions(request);
     }
@@ -2151,6 +2246,11 @@ async function handleRequest(request) {
     }
 
     if (path === "/v1/audio/speech") {
+        const authResponse = authenticateSpeechRequest(request, env);
+        if (authResponse) {
+            return authResponse;
+        }
+
         try {
             const contentType = request.headers.get("content-type") || "";
             
@@ -2208,13 +2308,59 @@ async function handleRequest(request) {
     return new Response("Not Found", { status: 404 });
 }
 
+function authenticateSpeechRequest(request, env) {
+    const expectedApiKey = getConfiguredApiKey(env);
+    const requestApiKey = readApiKey(request);
+
+    if (requestApiKey === expectedApiKey) {
+        return null;
+    }
+
+    return new Response(JSON.stringify({
+        error: {
+            message: "Invalid API key",
+            type: "invalid_request_error",
+            param: "x-api-key",
+            code: "invalid_api_key"
+        }
+    }), {
+        status: 401,
+        headers: {
+            "Content-Type": "application/json",
+            ...makeCORSHeaders()
+        }
+    });
+}
+
+function getConfiguredApiKey(env = {}) {
+    for (const key of API_KEY_ENV_KEYS) {
+        const value = env && env[key];
+        if (typeof value === "string" && value.trim()) {
+            return value.trim();
+        }
+    }
+
+    return DEFAULT_API_KEY;
+}
+
+function readApiKey(request) {
+    const headerApiKey = request.headers.get("x-api-key");
+    if (headerApiKey && headerApiKey.trim()) {
+        return headerApiKey.trim();
+    }
+
+    const authorization = request.headers.get("authorization") || "";
+    const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
+    return bearerMatch ? bearerMatch[1].trim() : "";
+}
+
 async function handleOptions(request) {
     return new Response(null, {
         status: 204,
         headers: {
             ...makeCORSHeaders(),
             "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
-            "Access-Control-Allow-Headers": request.headers.get("Access-Control-Request-Headers") || "Authorization"
+            "Access-Control-Allow-Headers": request.headers.get("Access-Control-Request-Headers") || "Content-Type, x-api-key, Authorization"
         }
     });
 }
@@ -2547,7 +2693,7 @@ function makeCORSHeaders() {
     return {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, x-api-key",
+        "Access-Control-Allow-Headers": "Content-Type, x-api-key, Authorization",
         "Access-Control-Max-Age": "86400"
     };
 }
@@ -2923,4 +3069,3 @@ async function handleAudioTranscription(request) {
         });
     }
 }
-
